@@ -16,27 +16,38 @@ func GinMiddleware(conn client.Client) gin.HandlerFunc {
 		startTime := time.Now()
 
 		defer func() {
-			endTime := time.Now()
+			go func() {
+				endTime := time.Now()
 
-			bp, err := getPointsBatch()
-			if err != nil {
-				return
-			}
+				bp, err := getPointsBatch()
+				if err != nil {
+					return
+				}
 
-			fields := map[string]interface{}{
-				"execution_time": endTime.Sub(startTime).Nanoseconds() / int64(time.Millisecond),
-			}
+				fields := map[string]interface{}{
+					"execution_time": endTime.Sub(startTime).Nanoseconds() / int64(time.Millisecond),
+					"content_length": c.Writer.Size(),
+					"status_code":    c.Writer.Status(),
+				}
 
-			tags["handler"] = c.Request.URL.Path
-			tags["handler_func"] = filepath.Base(c.HandlerName())
+				handlerTags := map[string]string{
+					"handler":      c.Request.URL.Path,
+					"handler_func": filepath.Base(c.HandlerName()),
+					"method":       c.Request.Method,
+				}
 
-			pt, err := client.NewPoint(httpHandlerTablename, tags, fields, endTime)
-			if err != nil {
-				return
-			}
+				for k, v := range handlerTags {
+					tags[k] = v
+				}
 
-			bp.AddPoint(pt)
-			conn.Write(bp)
+				pt, err := client.NewPoint(httpHandlerTablename, tags, fields, endTime)
+				if err != nil {
+					return
+				}
+
+				bp.AddPoint(pt)
+				conn.Write(bp)
+			}()
 		}()
 
 		c.Next()

@@ -2,6 +2,7 @@ package influence
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	client "github.com/influxdata/influxdb/client/v2"
@@ -15,26 +16,41 @@ func DefaultMiddleware(conn client.Client, next http.Handler) http.Handler {
 		startTime := time.Now()
 
 		defer func() {
-			endTime := time.Now()
+			go func() {
+				endTime := time.Now()
 
-			bp, err := getPointsBatch()
-			if err != nil {
-				return
-			}
+				bp, err := getPointsBatch()
+				if err != nil {
+					return
+				}
 
-			fields := map[string]interface{}{
-				"execution_time": endTime.Sub(startTime).Nanoseconds() / int64(time.Millisecond),
-			}
+				contentLength, err := strconv.Atoi(w.Header().Get("Content-Length"))
+				if err != nil {
+					contentLength = 0
+				}
 
-			tags["handler"] = r.URL.Path
+				fields := map[string]interface{}{
+					"execution_time": endTime.Sub(startTime).Nanoseconds() / int64(time.Millisecond),
+					"content_length": contentLength,
+				}
 
-			pt, err := client.NewPoint(httpHandlerTablename, tags, fields, endTime)
-			if err != nil {
-				return
-			}
+				handlerTags := map[string]string{
+					"handler": r.URL.Path,
+					"method":  r.Method,
+				}
 
-			bp.AddPoint(pt)
-			conn.Write(bp)
+				for k, v := range handlerTags {
+					tags[k] = v
+				}
+
+				pt, err := client.NewPoint(httpHandlerTablename, tags, fields, endTime)
+				if err != nil {
+					return
+				}
+
+				bp.AddPoint(pt)
+				conn.Write(bp)
+			}()
 		}()
 
 		next.ServeHTTP(w, r)
